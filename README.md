@@ -11,7 +11,7 @@ This MVP provides a lightweight React frontend for submitting basic information 
 - Simple, elegant volunteer intake form
 - Tailwind-styled, accessible UI
 - Anonymous interaction logging (optional)
-- Built for integration with [`libelle-core`](https://github.com/thechamberofus/libelle-core)
+- Built for integration with [`libelle-core`](https://github.com/the-chamber-of-us/libelle-core)
 - Privacy-first: No third-party tracking, no analytics bloat
 
 ---
@@ -22,7 +22,7 @@ This MVP provides a lightweight React frontend for submitting basic information 
 
 - Node.js (v18+ recommended)
 - npm or yarn
-- The [`libelle-core`](https://github.com/thechamberofus/libelle-core) backend running locally or deployed
+- The [`libelle-core`](https://github.com/the-chamber-of-us/libelle-core) backend running locally or deployed
 
 ### Setup
 
@@ -57,7 +57,7 @@ By default, the form will POST to `http://localhost:8000/upload`.
 
 ## 📡 Backend Integration
 
-This frontend is designed to work seamlessly with the [`libelle-core`](https://github.com/thechamberofus/libelle-core) backend. You can update the API endpoint in `.env.local`:
+This frontend is designed to work seamlessly with the [`libelle-core`](https://github.com/the-chamber-of-us/libelle-core) backend. You can update the API endpoint in `.env.local`:
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
