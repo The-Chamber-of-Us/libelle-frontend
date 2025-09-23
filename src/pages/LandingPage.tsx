@@ -9,7 +9,7 @@ export default function LandingPage() {
 
       <main className="flex flex-col items-center justify-center flex-1">
         <h1 className="text-2xl font-semibold mb-4">
-          Welcome to Libelle Volunteer Intake
+          Welcome to Libelle
         </h1>
         <p className="mb-6 max-w-md text-gray-700">
           A simple and privacy-first way to start your volunteering journey.

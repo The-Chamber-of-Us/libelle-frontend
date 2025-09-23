@@ -1,4 +1,3 @@
-// src/pages/VolunteerFormPage.tsx
 import { useState } from "react";
 import Input from "../components/Input";
 
@@ -12,18 +11,25 @@ export default function VolunteerFormPage() {
   const [linkedin, setLinkedin] = useState("");
   const [github, setGithub] = useState("");
   const [why, setWhy] = useState("");
-
   const [resumeFile, setResumeFile] = useState<File | null>(null);
 
+  // consent / opt-in (sent to backend)
+  const [consent, setConsent] = useState(false);
+  const [optIn, setOptIn] = useState(false);
+
+  // UX flags
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = useState(false);
 
+  // request state
+  const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  // helpers
   const isRequired = (v: string) =>
     v.trim().length ? undefined : "This field is required";
-
-  const isValidEmail = (v: string) =>
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-
+  const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   const numberInRange = (v: string, min: number, max: number) => {
     if (!v.trim().length) return "This field is required";
     const n = Number(v);
@@ -32,41 +38,38 @@ export default function VolunteerFormPage() {
     return undefined;
   };
 
+  // base validations
   const fullNameErr = isRequired(fullName);
   const emailBaseErr =
-    email.length === 0
-      ? "This field is required"
-      : isValidEmail(email)
-      ? undefined
-      : "Please enter a valid email";
-
+    email.length === 0 ? "This field is required" : isValidEmail(email) ? undefined : "Please enter a valid email";
   const locationErr = isRequired(location);
   const areasErr = isRequired(areas);
   const capacityErr = numberInRange(capacity, 0, 168);
 
-  const MAX_MB =
-    Number(import.meta.env.VITE_MAX_FILE_MB ?? 5) || 5;
+  // PDF
+  const MAX_MB = Number(import.meta.env.VITE_MAX_FILE_MB ?? 5) || 5;
   const maxBytes = MAX_MB * 1024 * 1024;
-
   const validateResume = (file: File | null): string | undefined => {
     if (!file) return "This field is required";
     if (file.type !== "application/pdf") return "Only PDF files are allowed";
-    if (file.size > maxBytes)
-      return `File is too large (max ${MAX_MB} MB)`;
+    if (file.size > maxBytes) return `File is too large (max ${MAX_MB} MB)`;
     return undefined;
   };
-
   const resumeErrBase = validateResume(resumeFile);
 
-  const showErr = (field: string, err?: string) =>
-    (submitted || touched[field]) ? err : undefined;
-
+  // visibility helpers
+  const showErr = (field: string, err?: string) => (submitted || touched[field]) ? err : undefined;
   const showValid = (field: string, valPresent: boolean, err?: string) =>
     (submitted || touched[field]) && valPresent && !err;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // submit
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
+    setServerError(null);
+    setSuccess(false);
+
+    const consentErr = consent ? undefined : "Consent is required to proceed";
 
     const anyError =
       fullNameErr ||
@@ -74,25 +77,67 @@ export default function VolunteerFormPage() {
       locationErr ||
       areasErr ||
       capacityErr ||
-      resumeErrBase;
+      resumeErrBase ||
+      consentErr;
 
-    if (!anyError) {
-      // aquí iría el POST /upload con FormData
-      // const fd = new FormData();
-      // fd.append("name", fullName);
-      // fd.append("email", email);
-      // fd.append("location", location);
-      // fd.append("areas", areas);
-      // fd.append("capacity", capacity);
-      // fd.append("experience", experience);
-      // fd.append("linkedin", linkedin);
-      // fd.append("github", github);
-      // fd.append("why", why);
-      // if (resumeFile) fd.append("resume", resumeFile);
+    if (anyError) {
+      if (!consent) setTouched((t) => ({ ...t, consent: true }));
+      return;
+    }
 
-      // fetch(`${import.meta.env.VITE_API_BASE_URL}/upload`, { method: "POST", body: fd })
+    try {
+      setLoading(true);
 
-      // console.log("OK submit");
+      const fd = new FormData();
+      // ui_* keys
+      fd.append("ui_name", fullName.trim());
+      fd.append("ui_email", email.trim());
+      fd.append("ui_location", location.trim());
+      fd.append("ui_areas_free_text", areas.trim());
+      fd.append("ui_capacity", capacity.trim());
+      if (experience.trim()) fd.append("ui_experience", experience.trim());
+      if (linkedin.trim()) fd.append("ui_linkedin", linkedin.trim());
+      if (github.trim()) fd.append("ui_github", github.trim());
+      if (why.trim()) fd.append("ui_why", why.trim());
+
+      // flat keys (compat)
+      fd.append("name", fullName.trim());
+      fd.append("email", email.trim());
+      fd.append("location", location.trim());
+      fd.append("areas", areas.trim());
+      fd.append("capacity", capacity.trim());
+      if (experience.trim()) fd.append("experience", experience.trim());
+      if (linkedin.trim()) fd.append("linkedin", linkedin.trim());
+      if (github.trim()) fd.append("github", github.trim());
+      if (why.trim()) fd.append("why", why.trim());
+
+      // consent
+      fd.append("consent", String(consent));
+      fd.append("opt_in_updates", String(optIn));
+
+      // file
+      if (resumeFile) fd.append("resume", resumeFile);
+
+      const base = (import.meta.env.VITE_API_BASE_URL ?? "").toString().replace(/\/+$/, "");
+      const url = `${base}/upload`;
+
+      const res = await fetch(url, { method: "POST", body: fd });
+
+      if (!res.ok) {
+        let message = `Upload failed (${res.status})`;
+        try {
+          const data = await res.json();
+          if (data?.error) message = data.error;
+        } catch {}
+        throw new Error(message);
+      }
+
+      setSuccess(true);
+      handleReset();
+    } catch (err: any) {
+      setServerError(err?.message ?? "Unexpected error");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -107,43 +152,52 @@ export default function VolunteerFormPage() {
     setGithub("");
     setWhy("");
     setResumeFile(null);
+    setConsent(false);
+    setOptIn(false);
     setTouched({});
     setSubmitted(false);
   };
 
   const baseTextArea =
-    "w-full resize-none rounded-lg border px-3 py-2 text-sm outline-none transition focus:ring-2 border-gray-300 focus:ring-indigo-500";
+    "w-full resize-none rounded-lg border px-3 py-2 text-sm outline-none transition focus:ring-2 border-libelle-gray focus:ring-libelle-accent";
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Hero / Intro band */}
-      <section className="bg-indigo-50">
+      <section className="bg-libelle-background">
         <div className="mx-auto max-w-3xl px-6 py-14 text-center">
-          <h1 className="text-2xl md:text-3xl font-semibold text-gray-900">
+          <h1 className="text-2xl md:text-3xl font-semibold text-libelle-text">
             We help you plug in fast.
           </h1>
-          <div className="mt-4 space-y-3 text-sm md:text-base text-gray-700 leading-relaxed">
-            <p>
-              You found us for a reason. You’re ready to put your talent toward
-              something that matters.
-            </p>
-            <p>
-              You won’t just be another volunteer—you’ll be a co-founder in a new kind of organization.
-            </p>
+          <div className="mt-4 space-y-3 text-sm md:text-base text-libelle-text leading-relaxed">
+            <p>You found us for a reason. You’re ready to put your talent toward something that matters.</p>
+            <p>You won’t just be another volunteer—you’ll be a co-founder in a new kind of organization.</p>
             <p>
               Here’s our promise: We’ll connect you with a team, give you a clear mission,
               and put your skills to work on a project with real-world stakes.
               No more wasted time. Just meaningful work, with people aligned on mission.
             </p>
-            <p className="text-gray-500">Most people finish in under 5 minutes.</p>
+            <p className="text-libelle-gray">Most people finish in under 5 minutes.</p>
+          </div>
+
+          {/* Banners */}
+          <div className="mt-6 space-y-3 text-left">
+            {serverError && (
+              <div className="rounded-lg border border-libelle-error bg-libelle-error/10 px-4 py-3 text-sm text-libelle-error">
+                {serverError}
+              </div>
+            )}
+            {success && (
+              <div className="rounded-lg border border-libelle-trust bg-libelle-trust/10 px-4 py-3 text-sm text-libelle-trust">
+                Thanks! Your information was submitted successfully.
+              </div>
+            )}
           </div>
 
           {/* Card */}
-          <div className="mt-10 rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 text-left">
+          <div className="mt-6 rounded-2xl bg-white p-6 md:p-8 shadow-sm border border-gray-200 text-left">
             <form className="space-y-6" onSubmit={handleSubmit}>
-              {/* Grid 2 cols on md+ */}
+              {/* Grid 2 cols */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Full Name */}
                 <Input
                   label="Full Name"
                   required
@@ -154,8 +208,6 @@ export default function VolunteerFormPage() {
                   error={showErr("fullName", fullNameErr)}
                   valid={showValid("fullName", fullName.trim().length > 0, fullNameErr)}
                 />
-
-                {/* Email */}
                 <Input
                   label="Email"
                   required
@@ -167,8 +219,6 @@ export default function VolunteerFormPage() {
                   error={showErr("email", emailBaseErr)}
                   valid={showValid("email", email.trim().length > 0, emailBaseErr)}
                 />
-
-                {/* Location */}
                 <Input
                   label="Location"
                   required
@@ -179,8 +229,6 @@ export default function VolunteerFormPage() {
                   error={showErr("location", locationErr)}
                   valid={showValid("location", location.trim().length > 0, locationErr)}
                 />
-
-                {/* Areas of Interest */}
                 <Input
                   label="Areas of Interest"
                   required
@@ -191,8 +239,6 @@ export default function VolunteerFormPage() {
                   error={showErr("areas", areasErr)}
                   valid={showValid("areas", areas.trim().length > 0, areasErr)}
                 />
-
-                {/* Capacity (number 0–168) */}
                 <Input
                   label="Capacity (Hours/week)"
                   required
@@ -204,8 +250,6 @@ export default function VolunteerFormPage() {
                   error={showErr("capacity", capacityErr)}
                   valid={showValid("capacity", capacity.trim().length > 0, capacityErr)}
                 />
-
-                {/* Experience Level (optional) */}
                 <Input
                   label="Experience Level (optional)"
                   value={experience}
@@ -213,8 +257,6 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, experience: true }))}
                   placeholder="Ex: Entry, Mid, Senior"
                 />
-
-                {/* LinkedIn (optional) */}
                 <Input
                   label="LinkedIn Link (optional)"
                   type="url"
@@ -223,8 +265,6 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, linkedin: true }))}
                   placeholder="Ex: linkedin.com/in/johndoe"
                 />
-
-                {/* GitHub (optional) */}
                 <Input
                   label="GitHub Link (optional)"
                   type="url"
@@ -237,18 +277,17 @@ export default function VolunteerFormPage() {
 
               {/* Upload (PDF only) */}
               <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-800">
-                  Upload resume (PDF only, max {MAX_MB}MB) <span className="text-rose-600">*</span>
+                <label className="block text-sm font-medium text-libelle-text">
+                  Upload resume (PDF only, max {MAX_MB}MB) <span className="text-libelle-error">*</span>
                 </label>
-
                 <label
                   className={[
-                    "block cursor-pointer rounded-lg border-2 border-dashed px-4 py-6 text-center text-sm hover:bg-gray-100",
+                    "block cursor-pointer rounded-lg border-2 border-dashed px-4 py-6 text-center text-sm hover:bg-white",
                     showErr("resume", resumeErrBase)
-                      ? "border-[#F43F5E] text-[#F43F5E]/90"
+                      ? "border-libelle-error text-libelle-error"
                       : showValid("resume", !!resumeFile, resumeErrBase)
-                      ? "border-[#10B981] text-[#10B981]"
-                      : "border-gray-300 text-indigo-700 bg-gray-50",
+                      ? "border-libelle-trust text-libelle-trust"
+                      : "border-libelle-gray text-libelle-accent bg-libelle-background",
                   ].join(" ")}
                 >
                   <input
@@ -272,16 +311,15 @@ export default function VolunteerFormPage() {
                     </span>
                   )}
                 </label>
-
                 {showErr("resume", resumeErrBase) && (
-                  <p className="text-xs text-[#F43F5E] mt-1">{resumeErrBase}</p>
+                  <p className="text-xs text-libelle-error mt-1">{resumeErrBase}</p>
                 )}
               </div>
 
               {/* Why */}
               <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-800">
-                  Why are you interested in TCUS <span className="text-gray-400">(optional)</span>
+                <label className="block text-sm font-medium text-libelle-text">
+                  Why are you interested in TCUS <span className="text-libelle-gray">(optional)</span>
                 </label>
                 <textarea
                   rows={6}
@@ -291,14 +329,16 @@ export default function VolunteerFormPage() {
                   placeholder="Tell us more about what motivates you and where you want to plug in."
                   className={baseTextArea}
                 />
+                {/* helper under textarea */}
+                <p className="text-xs text-libelle-gray">This will help us understand you better</p>
               </div>
 
               {/* Privacy & consent panel */}
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50/60">
-                <div className="rounded-t-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white">
+              <div className="rounded-xl border border-libelle-accent/20 bg-libelle-background">
+                <div className="rounded-t-xl bg-libelle-accent px-4 py-2 text-sm font-medium text-white">
                   Privacy and consent
                 </div>
-                <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-gray-800">
+                <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-libelle-text">
                   <p>
                     At The Chamber of Us (TCUS), we take your privacy seriously. We will use the
                     information you share here solely for the purpose of matching you with volunteer
@@ -314,35 +354,55 @@ export default function VolunteerFormPage() {
                     See our full privacy policy. <a className="underline" href="#" onClick={(e)=>e.preventDefault()}>See our privacy policy</a>.
                   </p>
 
+                  {/* Consent required */}
                   <label className="flex gap-3 items-start">
-                    <input type="checkbox" className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-libelle-gray text-libelle-accent focus:ring-libelle-accent cursor-pointer"
+                      checked={consent}
+                      onChange={(e) => setConsent(e.target.checked)}
+                      onBlur={() => setTouched((t) => ({ ...t, consent: true }))}
+                      aria-invalid={!!showErr("consent", consent ? undefined : "Consent is required to proceed")}
+                    />
                     <span>
                       I understand and consent to TCUS using the information I’ve provided to match me with
-                      volunteer opportunities in alignment with the mission. <span className="text-rose-600">*</span>
+                      volunteer opportunities in alignment with the mission. <span className="text-libelle-error">*</span>
                     </span>
                   </label>
+                  {showErr("consent", consent ? undefined : "Consent is required to proceed") && (
+                    <p className="text-xs text-libelle-error">Consent is required to proceed</p>
+                  )}
 
+                  {/* Optional opt-in */}
                   <label className="flex gap-3 items-start">
-                    <input type="checkbox" className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-libelle-gray text-libelle-accent focus:ring-libelle-accent cursor-pointer"
+                      checked={optIn}
+                      onChange={(e) => setOptIn(e.target.checked)}
+                    />
                     <span>
                       We’re building something big and experimental at TCUS, and we’d love to keep you in the loop
-                      as new projects and volunteer opportunities emerge <span className="text-gray-500">(optional)</span>
+                      as new projects and volunteer opportunities emerge <span className="text-libelle-gray">(optional)</span>
                     </span>
                   </label>
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center gap-3">
+              {/* Actions (centered) */}
+              <div className="flex items-center justify-center gap-4">
                 <button
                   type="submit"
-                  className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  disabled={loading}
+                  className="inline-flex items-center justify-center rounded-lg bg-libelle-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-libelle-accent/90 focus:outline-none focus:ring-2 focus:ring-libelle-accent disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                  aria-busy={loading}
                 >
-                  Submit
+                  {loading ? "Submitting..." : "Submit"}
                 </button>
                 <button
                   type="reset"
-                  className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  disabled={loading}
+                  className="rounded-lg border border-libelle-gray bg-white px-5 py-2.5 text-sm font-medium text-libelle-text hover:bg-libelle-background focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                   onClick={handleReset}
                 >
                   Clear form
@@ -353,22 +413,12 @@ export default function VolunteerFormPage() {
 
           {/* Bottom copy */}
           <div className="mx-auto max-w-2xl pt-10 text-center">
-            <h2 className="text-lg font-semibold text-gray-900">Ready to join?</h2>
-            <div className="mt-2 space-y-2 text-sm text-gray-600 leading-relaxed">
-              <p>
-                We’re not just looking for volunteers—we’re looking for builders. We’re a remote-first, flexible crew,
-                and we’re building the future of social impact together.
-              </p>
-              <p className="text-gray-500">
-                This is a quick intake, designed to help us understand where you can best plug in. Once you submit,
-                a core team member will reach out with the next steps.
-              </p>
-              <p>
-                Born from a flood of resumes. Built by the ones who sent them. That’s Libelle.
-              </p>
-              <p className="text-xs text-gray-400">
-                Built inside The Chamber of Us (TCUS), a volunteer-powered nonprofit.
-              </p>
+            <h2 className="text-lg font-semibold text-libelle-text">Ready to join?</h2>
+            <div className="mt-2 space-y-2 text-sm text-libelle-text leading-relaxed">
+              <p>We’re not just looking for volunteers—we’re looking for builders. We’re a remote-first, flexible crew, and we’re building the future of social impact together.</p>
+              <p className="text-libelle-gray">This is a quick intake, designed to help us understand where you can best plug in. Once you submit, a core team member will reach out with the next steps.</p>
+              <p>Born from a flood of resumes. Built by the ones who sent them. That’s Libelle.</p>
+              <p className="text-xs text-libelle-gray">Built inside The Chamber of Us (TCUS), a volunteer-powered nonprofit.</p>
             </div>
           </div>
         </div>
