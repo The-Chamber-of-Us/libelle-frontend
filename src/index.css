@@ -1,4 +1,20 @@
 @import "tailwindcss";
 
 
+@theme {
+  --color-libelle-accent: #4F46E5;
+  --color-libelle-background: #EEF2FF;
+  --color-libelle-trust: #10B981;
+  --color-libelle-error: #F43F5E;
+  --color-libelle-text: #1F2937;
+  --color-libelle-gray: #9CA3AF;
+  --color-libelle-darkGray: #72727B;
+}
+
+/* tus estilos globales */
+button { cursor: pointer; }
+
+
+
+
 button { cursor: pointer; }
