@@ -13,20 +13,16 @@ export default function VolunteerFormPage() {
   const [why, setWhy] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
 
-  // consent / opt-in (sent to backend)
   const [consent, setConsent] = useState(false);
   const [optIn, setOptIn] = useState(false);
 
-  // UX flags
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = useState(false);
 
-  // request state
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  // helpers
   const isRequired = (v: string) =>
     v.trim().length ? undefined : "This field is required";
   const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -41,28 +37,32 @@ export default function VolunteerFormPage() {
   // base validations
   const fullNameErr = isRequired(fullName);
   const emailBaseErr =
-    email.length === 0 ? "This field is required" : isValidEmail(email) ? undefined : "Please enter a valid email";
+    email.length === 0
+      ? "This field is required"
+      : isValidEmail(email)
+      ? undefined
+      : "Please enter a valid email";
   const locationErr = isRequired(location);
   const areasErr = isRequired(areas);
   const capacityErr = numberInRange(capacity, 0, 168);
 
-  // PDF
+  // PDF (TEMP: optional while testing with Google Apps Script)
   const MAX_MB = Number(import.meta.env.VITE_MAX_FILE_MB ?? 5) || 5;
   const maxBytes = MAX_MB * 1024 * 1024;
   const validateResume = (file: File | null): string | undefined => {
-    if (!file) return "This field is required";
+    // ⚠️ Temporal: PDF NO es requerido para esta prueba con Apps Script
+    if (!file) return undefined; // antes: "This field is required"
     if (file.type !== "application/pdf") return "Only PDF files are allowed";
     if (file.size > maxBytes) return `File is too large (max ${MAX_MB} MB)`;
     return undefined;
   };
   const resumeErrBase = validateResume(resumeFile);
 
-  // visibility helpers
-  const showErr = (field: string, err?: string) => (submitted || touched[field]) ? err : undefined;
+  const showErr = (field: string, err?: string) =>
+    submitted || touched[field] ? err : undefined;
   const showValid = (field: string, valPresent: boolean, err?: string) =>
     (submitted || touched[field]) && valPresent && !err;
 
-  // submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
@@ -77,7 +77,8 @@ export default function VolunteerFormPage() {
       locationErr ||
       areasErr ||
       capacityErr ||
-      resumeErrBase ||
+      // PDF queda fuera de la validación por ahora:
+      // resumeErrBase ||
       consentErr;
 
     if (anyError) {
@@ -85,60 +86,61 @@ export default function VolunteerFormPage() {
       return;
     }
 
-    try {
-      setLoading(true);
+      try {
+    setLoading(true);
 
-      const fd = new FormData();
-      // ui_* keys
-      fd.append("ui_name", fullName.trim());
-      fd.append("ui_email", email.trim());
-      fd.append("ui_location", location.trim());
-      fd.append("ui_areas_free_text", areas.trim());
-      fd.append("ui_capacity", capacity.trim());
-      if (experience.trim()) fd.append("ui_experience", experience.trim());
-      if (linkedin.trim()) fd.append("ui_linkedin", linkedin.trim());
-      if (github.trim()) fd.append("ui_github", github.trim());
-      if (why.trim()) fd.append("ui_why", why.trim());
+    // Construimos el body como URLSearchParams para evitar preflight (y CORS)
+    const params = new URLSearchParams({
+      // ui_* (coinciden con las columnas del Sheet)
+      ui_name: fullName.trim(),
+      ui_email: email.trim(),
+      ui_location: location.trim(),
+      ui_areas_free_text: areas.trim(),
+      ui_capacity: capacity.trim(),
+      ui_experience_level: experience.trim(),
+      linkedin_url: linkedin.trim(),
+      github_url: github.trim(),
+      ui_why: why.trim(),
 
-      // flat keys (compat)
-      fd.append("name", fullName.trim());
-      fd.append("email", email.trim());
-      fd.append("location", location.trim());
-      fd.append("areas", areas.trim());
-      fd.append("capacity", capacity.trim());
-      if (experience.trim()) fd.append("experience", experience.trim());
-      if (linkedin.trim()) fd.append("linkedin", linkedin.trim());
-      if (github.trim()) fd.append("github", github.trim());
-      if (why.trim()) fd.append("why", why.trim());
+      // “planos” (compatibilidad)
+      name: fullName.trim(),
+      email: email.trim(),
+      location: location.trim(),
+      areas: areas.trim(),
+      capacity: capacity.trim(),
+      experience: experience.trim(),
+      linkedin: linkedin.trim(),
+      github: github.trim(),
+      why: why.trim(),
 
-      // consent
-      fd.append("consent", String(consent));
-      fd.append("opt_in_updates", String(optIn));
+      // flags
+      consent: String(consent),
+      opt_in_updates: String(optIn),
 
-      // file
-      if (resumeFile) fd.append("resume", resumeFile);
+      // placeholders para el mock
+      resume_file_id: "",
+      resume_file_url: "",
+    });
 
-      const base = (import.meta.env.VITE_API_BASE_URL ?? "").toString().replace(/\/+$/, "");
-      const url = `${base}/upload`;
+    // ⬇️ DEV (con Vite proxy): usamos la ruta local /gas
+    const res = await fetch('/gas', {
+      method: 'POST',
+      body: params, // NO pongas headers Content-Type a mano
+    });
 
-      const res = await fetch(url, { method: "POST", body: fd });
-
-      if (!res.ok) {
-        let message = `Upload failed (${res.status})`;
-        try {
-          const data = await res.json();
-          if (data?.error) message = data.error;
-        } catch {}
-        throw new Error(message);
-      }
-
-      setSuccess(true);
-      handleReset();
-    } catch (err: any) {
-      setServerError(err?.message ?? "Unexpected error");
-    } finally {
-      setLoading(false);
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`GAS error: ${res.status} ${text}`);
     }
+
+    setSuccess(true);
+    handleReset();
+  } catch (err: any) {
+    setServerError(err?.message ?? 'Unexpected error');
+  } finally {
+    setLoading(false);
+  }
+
   };
 
   const handleReset = () => {
@@ -169,14 +171,23 @@ export default function VolunteerFormPage() {
             We help you plug in fast.
           </h1>
           <div className="mt-4 space-y-3 text-sm md:text-base text-libelle-text leading-relaxed">
-            <p>You found us for a reason. You’re ready to put your talent toward something that matters.</p>
-            <p>You won’t just be another volunteer—you’ll be a co-founder in a new kind of organization.</p>
             <p>
-              Here’s our promise: We’ll connect you with a team, give you a clear mission,
-              and put your skills to work on a project with real-world stakes.
-              No more wasted time. Just meaningful work, with people aligned on mission.
+              You found us for a reason. You’re ready to put your talent toward
+              something that matters.
             </p>
-            <p className="text-libelle-gray">Most people finish in under 5 minutes.</p>
+            <p>
+              You won’t just be another volunteer—you’ll be a co-founder in a new
+              kind of organization.
+            </p>
+            <p>
+              Here’s our promise: We’ll connect you with a team, give you a clear
+              mission, and put your skills to work on a project with real-world
+              stakes. No more wasted time. Just meaningful work, with people aligned
+              on mission.
+            </p>
+            <p className="text-libelle-gray">
+              Most people finish in under 5 minutes.
+            </p>
           </div>
 
           {/* Banners */}
@@ -206,7 +217,11 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
                   placeholder="Ex: John Doe"
                   error={showErr("fullName", fullNameErr)}
-                  valid={showValid("fullName", fullName.trim().length > 0, fullNameErr)}
+                  valid={showValid(
+                    "fullName",
+                    fullName.trim().length > 0,
+                    fullNameErr
+                  )}
                 />
                 <Input
                   label="Email"
@@ -217,7 +232,11 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, email: true }))}
                   placeholder="Ex: john.doe@example.com"
                   error={showErr("email", emailBaseErr)}
-                  valid={showValid("email", email.trim().length > 0, emailBaseErr)}
+                  valid={showValid(
+                    "email",
+                    email.trim().length > 0,
+                    emailBaseErr
+                  )}
                 />
                 <Input
                   label="Location"
@@ -227,7 +246,11 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, location: true }))}
                   placeholder="Ex: San Francisco, CA, USA"
                   error={showErr("location", locationErr)}
-                  valid={showValid("location", location.trim().length > 0, locationErr)}
+                  valid={showValid(
+                    "location",
+                    location.trim().length > 0,
+                    locationErr
+                  )}
                 />
                 <Input
                   label="Areas of Interest"
@@ -237,7 +260,11 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, areas: true }))}
                   placeholder="Ex: Education, Healthcare, Environment"
                   error={showErr("areas", areasErr)}
-                  valid={showValid("areas", areas.trim().length > 0, areasErr)}
+                  valid={showValid(
+                    "areas",
+                    areas.trim().length > 0,
+                    areasErr
+                  )}
                 />
                 <Input
                   label="Capacity (Hours/week)"
@@ -248,7 +275,11 @@ export default function VolunteerFormPage() {
                   onBlur={() => setTouched((t) => ({ ...t, capacity: true }))}
                   placeholder="Ex: 2"
                   error={showErr("capacity", capacityErr)}
-                  valid={showValid("capacity", capacity.trim().length > 0, capacityErr)}
+                  valid={showValid(
+                    "capacity",
+                    capacity.trim().length > 0,
+                    capacityErr
+                  )}
                 />
                 <Input
                   label="Experience Level (optional)"
@@ -275,10 +306,11 @@ export default function VolunteerFormPage() {
                 />
               </div>
 
-              {/* Upload (PDF only) */}
+              {/* Upload (PDF optional during mock) */}
               <div className="space-y-1">
                 <label className="block text-sm font-medium text-libelle-text">
-                  Upload resume (PDF only, max {MAX_MB}MB) <span className="text-libelle-error">*</span>
+                  Upload resume (PDF only, max {MAX_MB}MB)
+                  {/* TODO: re-add required asterisk when PDF is mandatory */}
                 </label>
                 <label
                   className={[
@@ -303,7 +335,9 @@ export default function VolunteerFormPage() {
                     aria-invalid={!!showErr("resume", resumeErrBase)}
                   />
                   <span className="underline">
-                    {resumeFile ? `Selected: ${resumeFile.name}` : "Click to upload your resume"}
+                    {resumeFile
+                      ? `Selected: ${resumeFile.name}`
+                      : "Click to upload your resume (optional for now)"}
                   </span>
                   {resumeFile && (
                     <span className="block mt-1 text-xs opacity-70">
@@ -312,14 +346,17 @@ export default function VolunteerFormPage() {
                   )}
                 </label>
                 {showErr("resume", resumeErrBase) && (
-                  <p className="text-xs text-libelle-error mt-1">{resumeErrBase}</p>
+                  <p className="text-xs text-libelle-error mt-1">
+                    {resumeErrBase}
+                  </p>
                 )}
               </div>
 
               {/* Why */}
               <div className="space-y-1">
                 <label className="block text-sm font-medium text-libelle-text">
-                  Why are you interested in TCUS <span className="text-libelle-gray">(optional)</span>
+                  Why are you interested in TCUS{" "}
+                  <span className="text-libelle-gray">(optional)</span>
                 </label>
                 <textarea
                   rows={6}
@@ -329,8 +366,9 @@ export default function VolunteerFormPage() {
                   placeholder="Tell us more about what motivates you and where you want to plug in."
                   className={baseTextArea}
                 />
-                {/* helper under textarea */}
-                <p className="text-xs text-libelle-gray">This will help us understand you better</p>
+                <p className="text-xs text-libelle-gray">
+                  This will help us understand you better
+                </p>
               </div>
 
               {/* Privacy & consent panel */}
@@ -340,18 +378,28 @@ export default function VolunteerFormPage() {
                 </div>
                 <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-libelle-text">
                   <p>
-                    At The Chamber of Us (TCUS), we take your privacy seriously. We will use the
-                    information you share here solely for the purpose of matching you with volunteer
-                    opportunities that align with your skills, interests, and availability.
+                    At The Chamber of Us (TCUS), we take your privacy seriously.
+                    We will use the information you share here solely for the
+                    purpose of matching you with volunteer opportunities that align
+                    with your skills, interests, and availability.
                   </p>
                   <p>
-                    We do not collect any data beyond what is required to fulfill this purpose.
-                    We will never sell, share, or use your data for advertising, profiling, or unrelated analysis.
+                    We do not collect any data beyond what is required to fulfill
+                    this purpose. We will never sell, share, or use your data for
+                    advertising, profiling, or unrelated analysis.
                   </p>
                   <p>
-                    You can access, edit, or delete your information at any time. Our practices are
-                    designed to meet or exceed data protection laws including the GDPR and CCPA.
-                    See our full privacy policy. <a className="underline" href="#" onClick={(e)=>e.preventDefault()}>See our privacy policy</a>.
+                    You can access, edit, or delete your information at any time.
+                    Our practices are designed to meet or exceed data protection
+                    laws including the GDPR and CCPA. See our full privacy policy.{" "}
+                    <a
+                      className="underline"
+                      href="#"
+                      onClick={(e) => e.preventDefault()}
+                    >
+                      See our privacy policy
+                    </a>
+                    .
                   </p>
 
                   {/* Consent required */}
@@ -361,16 +409,27 @@ export default function VolunteerFormPage() {
                       className="mt-1 h-4 w-4 rounded border-libelle-gray text-libelle-accent focus:ring-libelle-accent cursor-pointer"
                       checked={consent}
                       onChange={(e) => setConsent(e.target.checked)}
-                      onBlur={() => setTouched((t) => ({ ...t, consent: true }))}
-                      aria-invalid={!!showErr("consent", consent ? undefined : "Consent is required to proceed")}
+                      onBlur={() =>
+                        setTouched((t) => ({ ...t, consent: true }))
+                      }
+                      aria-invalid={
+                        !!showErr(
+                          "consent",
+                          consent ? undefined : "Consent is required to proceed"
+                        )
+                      }
                     />
                     <span>
-                      I understand and consent to TCUS using the information I’ve provided to match me with
-                      volunteer opportunities in alignment with the mission. <span className="text-libelle-error">*</span>
+                      I understand and consent to TCUS using the information I’ve
+                      provided to match me with volunteer opportunities in
+                      alignment with the mission.{" "}
+                      <span className="text-libelle-error">*</span>
                     </span>
                   </label>
                   {showErr("consent", consent ? undefined : "Consent is required to proceed") && (
-                    <p className="text-xs text-libelle-error">Consent is required to proceed</p>
+                    <p className="text-xs text-libelle-error">
+                      Consent is required to proceed
+                    </p>
                   )}
 
                   {/* Optional opt-in */}
@@ -382,8 +441,10 @@ export default function VolunteerFormPage() {
                       onChange={(e) => setOptIn(e.target.checked)}
                     />
                     <span>
-                      We’re building something big and experimental at TCUS, and we’d love to keep you in the loop
-                      as new projects and volunteer opportunities emerge <span className="text-libelle-gray">(optional)</span>
+                      We’re building something big and experimental at TCUS, and
+                      we’d love to keep you in the loop as new projects and
+                      volunteer opportunities emerge{" "}
+                      <span className="text-libelle-gray">(optional)</span>
                     </span>
                   </label>
                 </div>
@@ -413,12 +474,28 @@ export default function VolunteerFormPage() {
 
           {/* Bottom copy */}
           <div className="mx-auto max-w-2xl pt-10 text-center">
-            <h2 className="text-lg font-semibold text-libelle-text">Ready to join?</h2>
+            <h2 className="text-lg font-semibold text-libelle-text">
+              Ready to join?
+            </h2>
             <div className="mt-2 space-y-2 text-sm text-libelle-text leading-relaxed">
-              <p>We’re not just looking for volunteers—we’re looking for builders. We’re a remote-first, flexible crew, and we’re building the future of social impact together.</p>
-              <p className="text-libelle-gray">This is a quick intake, designed to help us understand where you can best plug in. Once you submit, a core team member will reach out with the next steps.</p>
-              <p>Born from a flood of resumes. Built by the ones who sent them. That’s Libelle.</p>
-              <p className="text-xs text-libelle-gray">Built inside The Chamber of Us (TCUS), a volunteer-powered nonprofit.</p>
+              <p>
+                We’re not just looking for volunteers—we’re looking for builders.
+                We’re a remote-first, flexible crew, and we’re building the future
+                of social impact together.
+              </p>
+              <p className="text-libelle-gray">
+                This is a quick intake, designed to help us understand where you
+                can best plug in. Once you submit, a core team member will reach
+                out with the next steps.
+              </p>
+              <p>
+                Born from a flood of resumes. Built by the ones who sent them.
+                That’s Libelle.
+              </p>
+              <p className="text-xs text-libelle-gray">
+                Built inside The Chamber of Us (TCUS), a volunteer-powered
+                nonprofit.
+              </p>
             </div>
           </div>
         </div>
